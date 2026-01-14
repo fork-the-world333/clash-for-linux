@@ -343,9 +343,25 @@ if [ "$SKIP_CONFIG_REBUILD" != "true" ]; then
 
   # Configure Clash Dashboard
   Work_Dir="$(cd "$(dirname "$0")" && pwd)"
-  Dashboard_Dir="${Work_Dir}/dashboard/public"
+
+  # SAFE_PATHS: only allow paths under $Conf_Dir, so place dashboard under conf via symlink
+  Dashboard_Src="${Work_Dir}/dashboard/public"
+  Dashboard_Link="${Conf_Dir}/ui"
+  
   if [ "$EXTERNAL_CONTROLLER_ENABLED" = "true" ]; then
-    sed -ri "s@^# external-ui:.*@external-ui: ${Dashboard_Dir}@g" "$Conf_Dir/config.yaml" || true
+    # create/update symlink
+    if [ -d "$Dashboard_Src" ]; then
+      ln -sfn "$Dashboard_Src" "$Dashboard_Link"
+    else
+      echo -e "\033[33m[WARN]\033[0m Dashboard source not found: $Dashboard_Src (external-ui may not work)"
+    fi
+  
+    # ensure external-ui points to conf subpath
+    if grep -qE '^[[:space:]]*external-ui:' "$Conf_Dir/config.yaml"; then
+      sed -i -E "s|^[[:space:]]*external-ui:.*$|external-ui: ${Dashboard_Link}|g" "$Conf_Dir/config.yaml"
+    else
+      printf "\nexternal-ui: %s\n" "$Dashboard_Link" >> "$Conf_Dir/config.yaml"
+    fi
   fi
 
   # 写入 secret
