@@ -8,7 +8,6 @@ udp: true
 
 external-controller: 127.0.0.1:9090
 external-ui: /opt/clash-for-linux/dashboard/public
-secret: ""
 
 proxies: []
 proxy-groups: []
