@@ -347,6 +347,12 @@ if [ ! -s "$Conf_Dir/config.yaml" ]; then
   exit 1
 fi
 
+# 最终护栏：禁止未渲染的占位符进入运行态
+if grep -q '\${' "$Conf_Dir/config.yaml"; then
+  echo "[ERROR] config.yaml contains unresolved placeholders (\${...}). Please check template rendering." >&2
+  exit 1
+fi
+
 echo -e '\n正在启动Clash服务...'
 Text5="服务启动成功！"
 Text6="服务启动失败！"
