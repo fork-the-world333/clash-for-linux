@@ -49,6 +49,8 @@ CLASH_SOCKS_PORT=$(resolve_port_value "SOCKS" "$CLASH_SOCKS_PORT")
 CLASH_REDIR_PORT=$(resolve_port_value "REDIR" "$CLASH_REDIR_PORT")
 EXTERNAL_CONTROLLER=$(resolve_host_port "External Controller" "$EXTERNAL_CONTROLLER" "0.0.0.0")
 
+source "$Server_Dir/scripts/config_utils.sh"
+
 
 
 #################### 函数定义 ####################
@@ -219,6 +221,9 @@ else
 	# 如果禁用 external-controller，则注释掉该行
 	sed -i "s/external-controller: 'EXTERNAL_CONTROLLER_PLACEHOLDER'/# external-controller: disabled/g" $Temp_Dir/config.yaml
 fi
+
+apply_tun_config "$Temp_Dir/config.yaml"
+apply_mixin_config "$Temp_Dir/config.yaml" "$Server_Dir"
 
 \cp $Temp_Dir/config.yaml $Conf_Dir/
 

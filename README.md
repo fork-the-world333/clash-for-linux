@@ -106,6 +106,17 @@ $ sudo ./clashctl update
 $ sudo ./clashctl set-url "https://example.com/your-subscribe"
 ```
 
+订阅管理（多订阅）：
+
+```bash
+$ sudo ./clashctl sub add office "https://example.com/office" "User-Agent: ClashforWindows/0.20.39"
+$ sudo ./clashctl sub add personal "https://example.com/personal"
+$ sudo ./clashctl sub list
+$ sudo ./clashctl sub use personal
+$ sudo ./clashctl sub update
+$ sudo ./clashctl sub log
+```
+
 安装脚本会将 `clashctl` 安装到 `/usr/local/bin/clashctl`，安装后可直接使用：
 
 ```bash
@@ -178,6 +189,38 @@ $ sudo bash restart.sh --update
 
 ```bash
 $ sudo bash update.sh
+```
+
+如需通过订阅管理更新，可执行：
+
+```bash
+$ sudo clashctl sub update personal
+```
+
+<br>
+
+## Mixin 配置
+
+可通过 mixin 追加或覆盖 Clash 配置。默认读取 `conf/mixin.d` 下的 `.yaml/.yml` 文件（按文件名排序）。也可以通过 `.env` 设置指定路径：
+
+```bash
+export CLASH_MIXIN_PATHS='conf/mixin.d/base.yaml,conf/mixin.d/rules.yaml'
+export CLASH_MIXIN_DIR='conf/mixin.d'
+```
+
+<br>
+
+## Tun 模式
+
+Tun 模式需要 Clash Premium/Meta 支持。可在 `.env` 中启用并配置：
+
+```bash
+export CLASH_TUN_ENABLE=true
+export CLASH_TUN_STACK=system
+export CLASH_TUN_AUTO_ROUTE=true
+export CLASH_TUN_AUTO_REDIRECT=false
+export CLASH_TUN_STRICT_ROUTE=false
+export CLASH_TUN_DNS_HIJACK='any:53'
 ```
 
 <br>
