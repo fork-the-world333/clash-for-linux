@@ -241,11 +241,28 @@ if [ -z "$api_host" ] || [ "$api_host" = "$EXTERNAL_CONTROLLER" ]; then
 fi
 echo -e "🌐 Dashboard：http://${api_host}:${api_port}/ui"
 
-# secret 可能在 .env 里是 CLASH_SECRET
-if [ -n "${CLASH_SECRET:-}" ]; then
-  echo -e "🔐 Secret：${CLASH_SECRET}"
+# ---- Secret 展示（脱敏）----
+CONF_DIR="${CLASH_INSTALL_DIR:-/opt/clash-for-linux}/conf"
+CONF_FILE="$CONF_DIR/config.yaml"
+
+# 读取 secret（如果 clash 还没生成 config，就先不显示）
+SECRET_VAL=""
+if [ -f "$CONF_FILE" ]; then
+  SECRET_VAL="$(awk -F': *' '/^secret:/{print $2; exit}' "$CONF_FILE" | tr -d '"' | tr -d "'" )"
+fi
+
+if [ -n "$SECRET_VAL" ]; then
+  # 脱敏显示：前4后4
+  MASKED="${SECRET_VAL:0:4}****${SECRET_VAL: -4}"
+  echo ""
+  echo "🌐 Dashboard：http://127.0.0.1:9090/ui"
+  echo "🔐 Secret：${MASKED}"
+  echo "   查看完整 Secret：sudo awk -F': *' '/^secret:/{print \$2; exit}' $CONF_FILE"
 else
-  echo -e "🔐 Secret：请查看 .env 或启动日志输出"
+  echo ""
+  echo "🌐 Dashboard：http://127.0.0.1:9090/ui"
+  echo "🔐 Secret：未读取到（服务首次启动后生成），可用以下命令查看："
+  echo "   sudo awk -F': *' '/^secret:/{print \$2; exit}' $CONF_FILE"
 fi
 
 echo
