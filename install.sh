@@ -11,26 +11,40 @@ Service_User="${CLASH_SERVICE_USER:-clash}"
 Service_Group="${CLASH_SERVICE_GROUP:-$Service_User}"
 
 # =========================
-# 彩色输出（统一 printf + 自动降级）
+# 彩色输出（统一 printf + 自动降级 + 手动关色）
 # =========================
-# 仅在终端输出时启用颜色（避免重定向到文件时出现乱码）
-if [[ -t 1 ]] && command -v tput >/dev/null 2>&1; then
-  # tput 更兼容；若终端不支持也会返回非 0
+
+# ---- 关色开关（优先级最高）----
+NO_COLOR_FLAG=0
+for arg in "$@"; do
+  case "$arg" in
+    --no-color|--nocolor)
+      NO_COLOR_FLAG=1
+      ;;
+  esac
+done
+
+if [[ -n "${NO_COLOR:-}" ]] || [[ -n "${CLASH_NO_COLOR:-}" ]]; then
+  NO_COLOR_FLAG=1
+fi
+
+# ---- 初始化颜色 ----
+if [[ "$NO_COLOR_FLAG" -eq 0 ]] && [[ -t 1 ]] && command -v tput >/dev/null 2>&1; then
   if tput setaf 1 >/dev/null 2>&1; then
     C_RED="$(tput setaf 1)"
     C_GREEN="$(tput setaf 2)"
     C_YELLOW="$(tput setaf 3)"
     C_BLUE="$(tput setaf 4)"
     C_CYAN="$(tput setaf 6)"
-    C_GRAY="$(tput setaf 8 2>/dev/null || true)"   # 有些终端不支持 8
+    C_GRAY="$(tput setaf 8 2>/dev/null || true)"
     C_BOLD="$(tput bold)"
     C_UL="$(tput smul)"
     C_NC="$(tput sgr0)"
   fi
 fi
 
-# fallback：tput 不可用 / 不支持时，走 ANSI（同样只在 TTY）
-if [[ -t 1 ]] && [[ -z "${C_NC:-}" ]]; then
+# ---- ANSI fallback ----
+if [[ "$NO_COLOR_FLAG" -eq 0 ]] && [[ -t 1 ]] && [[ -z "${C_NC:-}" ]]; then
   C_RED=$'\033[31m'
   C_GREEN=$'\033[32m'
   C_YELLOW=$'\033[33m'
@@ -42,25 +56,38 @@ if [[ -t 1 ]] && [[ -z "${C_NC:-}" ]]; then
   C_NC=$'\033[0m'
 fi
 
-# 若非 TTY，彻底禁用
-if [[ ! -t 1 ]]; then
+# ---- 强制无色 ----
+if [[ "$NO_COLOR_FLAG" -eq 1 ]] || [[ ! -t 1 ]]; then
   C_RED='' C_GREEN='' C_YELLOW='' C_BLUE='' C_CYAN='' C_GRAY='' C_BOLD='' C_UL='' C_NC=''
 fi
 
-# 统一输出函数：不用 echo -e，避免兼容性坑
+# =========================
+# 基础输出函数
+# =========================
 log()   { printf "%b\n" "$*"; }
 info()  { log "${C_CYAN}[INFO]${C_NC} $*"; }
 ok()    { log "${C_GREEN}[OK]${C_NC} $*"; }
 warn()  { log "${C_YELLOW}[WARN]${C_NC} $*"; }
 err()   { log "${C_RED}[ERROR]${C_NC} $*"; }
 
-# 常用样式
+# =========================
+# 样式助手
+# =========================
 path()  { printf "%b" "${C_BOLD}$*${C_NC}"; }
 cmd()   { printf "%b" "${C_GRAY}$*${C_NC}"; }
 url()   { printf "%b" "${C_UL}$*${C_NC}"; }
 good()  { printf "%b" "${C_GREEN}$*${C_NC}"; }
 bad()   { printf "%b" "${C_RED}$*${C_NC}"; }
 
+# =========================
+# 分段标题（CLI 风格 section）
+# =========================
+section() {
+  local title="$*"
+  log ""
+  log "${C_BOLD}▶ ${title}${C_NC}"
+  log "${C_GRAY}────────────────────────────────────────${C_NC}"
+}
 
 # =========================
 # 前置校验
@@ -292,36 +319,39 @@ fi
 # =========================
 # 友好收尾输出（闭环）
 # =========================
-log ""
+section "安装完成"
 ok "Clash for Linux 已安装至: $(path "${Install_Dir}")"
-log ""
 
 log "📦 安装目录：$(path "${Install_Dir}")"
 log "👤 运行用户：${Service_User}:${Service_Group}"
 log "🔧 服务名称：${Service_Name}.service"
 
 if command -v systemctl >/dev/null 2>&1; then
-  # 状态值可做颜色：enabled/active 绿，其它红
+  section "服务状态"
+
   se="${Service_Enabled:-unknown}"
   ss="${Service_Started:-unknown}"
 
-  if [[ "$se" == "enabled" ]]; then se_colored="$(good "$se")"; else se_colored="$(bad "$se")"; fi
-  if [[ "$ss" == "active"  ]]; then ss_colored="$(good "$ss")"; else ss_colored="$(bad "$ss")"; fi
+  [[ "$se" == "enabled" ]] && se_colored="$(good "$se")" || se_colored="$(bad "$se")"
+  [[ "$ss" == "active"  ]] && ss_colored="$(good "$ss")" || ss_colored="$(bad "$ss")"
 
   log "🧷 开机自启：${se_colored}"
   log "🟢 服务状态：${ss_colored}"
+
   log ""
   log "${C_BOLD}常用命令：${C_NC}"
   log "  $(cmd "sudo systemctl status ${Service_Name}.service")"
   log "  $(cmd "sudo systemctl restart ${Service_Name}.service")"
 fi
 
-log ""
-# 面板地址与 secret（尽量从 .env 推导）
+# =========================
+# Dashboard / Secret
+# =========================
+section "控制面板"
+
 api_port="$(parse_port "${EXTERNAL_CONTROLLER}")"
 api_host="${EXTERNAL_CONTROLLER%:*}"
 
-# 默认只提示本机访问（更安全）
 if [[ -z "$api_host" ]] || [[ "$api_host" == "$EXTERNAL_CONTROLLER" ]]; then
   api_host="127.0.0.1"
 fi
@@ -329,7 +359,6 @@ fi
 CONF_DIR="$Install_Dir/conf"
 CONF_FILE="$CONF_DIR/config.yaml"
 
-# ---- Secret 展示（脱敏）----
 SECRET_VAL=""
 if wait_secret_ready "$CONF_FILE" 6; then
   SECRET_VAL="$(read_secret_from_config "$CONF_FILE" || true)"
@@ -347,23 +376,31 @@ else
   log "   稍后查看：$(cmd "sudo sed -nE 's/^[[:space:]]*secret:[[:space:]]*//p' \"$CONF_FILE\" | head -n 1")"
 fi
 
-log ""
+# =========================
+# 订阅状态
+# =========================
+section "订阅配置"
+
 if [[ -n "${CLASH_URL:-}" ]]; then
   ok "订阅地址已配置（CLASH_URL 已写入 .env）"
 else
   warn "订阅地址未配置：请编辑 $(path "${Install_Dir}/.env") 设置 CLASH_URL"
 fi
 
-log ""
-log "🧭 下一步（可选）："
+# =========================
+# 下一步
+# =========================
+section "下一步（可选）"
 log "  $(cmd "source /etc/profile.d/clash-for-linux.sh")"
 log "  $(cmd "proxy_on")"
-log ""
 
-# ---- 启动后快速诊断（可选）----
+# =========================
+# 启动后快速诊断
+# =========================
 sleep 1
 if command -v journalctl >/dev/null 2>&1; then
-  if journalctl -u "${Service_Name}.service" -n 50 --no-pager 2>/dev/null | grep -q "Clash订阅地址不可访问"; then
-    warn "服务启动异常：订阅不可用，请检查 CLASH_URL（可能过期/404/被墙）。"
+  if journalctl -u "${Service_Name}.service" -n 50 --no-pager 2>/dev/null \
+     | grep -q "Clash订阅地址不可访问"; then
+    warn "服务启动异常：订阅不可用，请检查 CLASH_URL（可能过期 / 404 / 被墙）。"
   fi
 fi
