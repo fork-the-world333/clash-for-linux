@@ -131,6 +131,28 @@ force_write_secret() {
   fi
 }
 
+force_write_controller_and_ui() {
+  local file="$1"
+
+  local controller="${EXTERNAL_CONTROLLER:-127.0.0.1:9090}"
+
+  # external-controller
+  if grep -qE '^[[:space:]]*external-controller:' "$file" 2>/dev/null; then
+    sed -i -E "s|^[[:space:]]*external-controller:.*$|external-controller: ${controller}|g" "$file"
+  else
+    printf "\nexternal-controller: %s\n" "$controller" >> "$file"
+  fi
+
+  # external-ui（存在 ui 才写）
+  if [ -d "$Conf_Dir/ui" ]; then
+    if grep -qE '^[[:space:]]*external-ui:' "$file" 2>/dev/null; then
+      sed -i -E "s|^[[:space:]]*external-ui:.*$|external-ui: ${Conf_Dir}/ui|g" "$file"
+    else
+      printf "external-ui: %s\n" "${Conf_Dir}/ui" >> "$file"
+    fi
+  fi
+}
+
 # 设置默认值
 CLASH_HTTP_PORT="${CLASH_HTTP_PORT:-7890}"
 CLASH_SOCKS_PORT="${CLASH_SOCKS_PORT:-7891}"
@@ -374,9 +396,15 @@ if [ "$SKIP_CONFIG_REBUILD" != "true" ]; then
   mkdir -p "$Temp_Dir" || true
 
   if [ "$ReturnStatus" -eq 0 ] && [ -s "$Temp_Dir/clash.yaml" ]; then
-    # 默认将订阅当作完整配置写入运行态 config
+    # 1) 订阅作为完整配置写入运行态 config
     cp -f "$Temp_Dir/clash.yaml" "$CONFIG_FILE"
+
+    # 2) 强制注入 external-controller / external-ui（运行态兜底）
+    force_write_controller_and_ui "$CONFIG_FILE" || true
+
+    # 3) 强制注入 secret
     force_write_secret "$CONFIG_FILE" || true
+
     echo "[INFO] Runtime config generated: $CONFIG_FILE (size=$(wc -c <"$CONFIG_FILE" 2>/dev/null || echo 0))"
   else
     echo "[WARN] Download did not produce clash.yaml (rc=$ReturnStatus), skip runtime config generation" >&2
