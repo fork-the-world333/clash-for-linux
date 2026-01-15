@@ -417,23 +417,48 @@ if [ "$SKIP_CONFIG_REBUILD" != "true" ]; then
     echo -e "\033[33m[WARN]\033[0m 未检测到可用的 subconverter，跳过订阅转换"
   fi
 
-  # 3) 取出代理相关配置（从 proxies: 开始）
-  if grep -q '^proxies:' "$Temp_Dir/clash_config.yaml"; then
-    sed -n '/^proxies:/,$p' "$Temp_Dir/clash_config.yaml" > "$Temp_Dir/proxy.txt"
-  else
-    echo "[WARN] no top-level 'proxies:' found in subscription, skip proxy extraction" >&2
-    SKIP_CONFIG_REBUILD=true
+  # 3) 订阅形态判断：
+  # - 如果已经是完整 Clash 配置（Meta/Mihomo 常见 mixed-port / proxy-providers 等），直接用它作为运行配置
+  # - 否则才走 “proxies: 抽取 + template 拼接”
+  if grep -qE '^(mixed-port:|port:|proxy-providers:|proxies:)' "$Temp_Dir/clash_config.yaml"; then
+    # 情况 A：完整配置（优先）
+    if grep -q '^proxies:' "$Temp_Dir/clash_config.yaml" || grep -q '^proxy-providers:' "$Temp_Dir/clash_config.yaml" || grep -q '^mixed-port:' "$Temp_Dir/clash_config.yaml" || grep -q '^port:' "$Temp_Dir/clash_config.yaml"; then
+      echo "[INFO] subscription looks like a full Clash config, use it directly"
+      cp -f "$Temp_Dir/clash_config.yaml" "$CONFIG_FILE"
+      # 写入 secret（运行态）
+      force_write_secret "$CONFIG_FILE"
+      # 直接跳过后续拼接流程
+      SKIP_CONFIG_REBUILD=true
+    fi
+  fi
+
+  # 情况 B：不是完整配置，才尝试抽取 proxies 并拼接
+  if [ "$SKIP_CONFIG_REBUILD" != "true" ]; then
+    if grep -q '^proxies:' "$Temp_Dir/clash_config.yaml"; then
+      sed -n '/^proxies:/,$p' "$Temp_Dir/clash_config.yaml" > "$Temp_Dir/proxy.txt"
+    else
+      echo "[ERROR] subscription is not a full config and also has no 'proxies:'; cannot build config." >&2
+      # systemd 模式：兜底继续；非 systemd：退出
+      if [ "${SYSTEMD_MODE:-false}" = "true" ]; then
+        ensure_fallback_config || true
+        SKIP_CONFIG_REBUILD=true
+      else
+        exit 2
+      fi
+    fi
   fi
 
   # 4) 合并形成新的 config，并替换配置占位符
-  cat "$Temp_Dir/templete_config.yaml" > "$CONFIG_FILE"
-  cat "$Temp_Dir/proxy.txt" >> "$CONFIG_FILE"
+  if [ "$SKIP_CONFIG_REBUILD" != "true" ]; then
+    cat "$Temp_Dir/templete_config.yaml" > "$CONFIG_FILE"
+    cat "$Temp_Dir/proxy.txt" >> "$CONFIG_FILE"
 
-  sed -i "s/CLASH_HTTP_PORT_PLACEHOLDER/${CLASH_HTTP_PORT}/g" "$CONFIG_FILE"
-  sed -i "s/CLASH_SOCKS_PORT_PLACEHOLDER/${CLASH_SOCKS_PORT}/g" "$CONFIG_FILE"
-  sed -i "s/CLASH_REDIR_PORT_PLACEHOLDER/${CLASH_REDIR_PORT}/g" "$CONFIG_FILE"
-  sed -i "s/CLASH_LISTEN_IP_PLACEHOLDER/${CLASH_LISTEN_IP}/g" "$CONFIG_FILE"
-  sed -i "s/CLASH_ALLOW_LAN_PLACEHOLDER/${CLASH_ALLOW_LAN}/g" "$CONFIG_FILE"
+    sed -i "s/CLASH_HTTP_PORT_PLACEHOLDER/${CLASH_HTTP_PORT}/g" "$CONFIG_FILE"
+    sed -i "s/CLASH_SOCKS_PORT_PLACEHOLDER/${CLASH_SOCKS_PORT}/g" "$CONFIG_FILE"
+    sed -i "s/CLASH_REDIR_PORT_PLACEHOLDER/${CLASH_REDIR_PORT}/g" "$CONFIG_FILE"
+    sed -i "s/CLASH_LISTEN_IP_PLACEHOLDER/${CLASH_LISTEN_IP}/g" "$CONFIG_FILE"
+    sed -i "s/CLASH_ALLOW_LAN_PLACEHOLDER/${CLASH_ALLOW_LAN}/g" "$CONFIG_FILE"
+  fi
 
   # 5) 配置 external-controller
   if [ "$EXTERNAL_CONTROLLER_ENABLED" = "true" ]; then
@@ -538,15 +563,18 @@ if [ "$ReturnStatus" -eq 0 ]; then
     echo "[INFO] SYSTEMD_MODE=true，前台启动交给 systemd 监管"
     echo "[INFO] Using config: $CONFIG_FILE"
     echo "[INFO] Using runtime dir: $RUNTIME_DIR"
-    # systemd 前台：让 systemd 直接跟踪 clash 进程
-    exec "$Clash_Bin" -d "$RUNTIME_DIR" -f "$CONFIG_FILE"
+
+    # systemd 前台：只用 -f 指定配置文件，-d 作为工作目录
+    exec "$Clash_Bin" -f "$CONFIG_FILE" -d "$RUNTIME_DIR"
   else
     echo "[INFO] 后台启动 (nohup)"
     echo "[INFO] Using config: $CONFIG_FILE"
     echo "[INFO] Using runtime dir: $RUNTIME_DIR"
-    nohup "$Clash_Bin" -d "$RUNTIME_DIR" -f "$CONFIG_FILE" >>"$Log_Dir/clash.log" 2>&1 &
+
+    nohup "$Clash_Bin" -f "$CONFIG_FILE" -d "$RUNTIME_DIR" >>"$Log_Dir/clash.log" 2>&1 &
     PID=$!
     ReturnStatus=$?
+
     if [ "$ReturnStatus" -eq 0 ]; then
       echo "$PID" > "$PID_FILE"
     fi
