@@ -143,13 +143,15 @@ force_write_controller_and_ui() {
     printf "\nexternal-controller: %s\n" "$controller" >> "$file"
   fi
 
-  # external-ui（存在 ui 才写）
-  if [ -d "$Conf_Dir/ui" ]; then
+  # external-ui（存在就写：支持软链）
+  if [ -e "$Conf_Dir/ui" ]; then
     if grep -qE '^[[:space:]]*external-ui:' "$file" 2>/dev/null; then
       sed -i -E "s|^[[:space:]]*external-ui:.*$|external-ui: ${Conf_Dir}/ui|g" "$file"
     else
       printf "external-ui: %s\n" "${Conf_Dir}/ui" >> "$file"
     fi
+  else
+    echo "[WARN] ui path not found: $Conf_Dir/ui (skip external-ui)" >&2
   fi
 }
 
