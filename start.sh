@@ -133,7 +133,6 @@ force_write_secret() {
 
 force_write_controller_and_ui() {
   local file="$1"
-
   local controller="${EXTERNAL_CONTROLLER:-127.0.0.1:9090}"
 
   # external-controller
@@ -143,15 +142,19 @@ force_write_controller_and_ui() {
     printf "\nexternal-controller: %s\n" "$controller" >> "$file"
   fi
 
-  # external-ui（存在就写：支持软链）
-  if [ -e "$Conf_Dir/ui" ]; then
-    if grep -qE '^[[:space:]]*external-ui:' "$file" 2>/dev/null; then
-      sed -i -E "s|^[[:space:]]*external-ui:.*$|external-ui: ${Conf_Dir}/ui|g" "$file"
-    else
-      printf "external-ui: %s\n" "${Conf_Dir}/ui" >> "$file"
-    fi
+  # systemd + 非root：external-ui 必须指向可写的 Temp_Dir/ui
+  local ui_link
+  if [ "${SYSTEMD_MODE:-false}" = "true" ] && [ "$(id -u)" -ne 0 ]; then
+    ui_link="$Temp_Dir/ui"
   else
-    echo "[WARN] ui path not found: $Conf_Dir/ui (skip external-ui)" >&2
+    ui_link="$Conf_Dir/ui"
+  fi
+
+  # 无条件写 external-ui（不要再用 -e 判断卡死）
+  if grep -qE '^[[:space:]]*external-ui:' "$file" 2>/dev/null; then
+    sed -i -E "s|^[[:space:]]*external-ui:.*$|external-ui: ${ui_link}|g" "$file"
+  else
+    printf "external-ui: %s\n" "$ui_link" >> "$file"
   fi
 }
 
@@ -430,13 +433,32 @@ fi
 # 判断订阅是否已是完整 Clash YAML（Meta / Mihomo / Premium）
 # 若是完整配置，则直接使用，跳过后续代理拆解与拼接
 # =========================================================
-if [ "$SKIP_CONFIG_REBUILD" != "true" ]; then
-  if grep -qE '^(proxies:|proxy-providers:|mixed-port:|port:)' "$Temp_Dir/clash.yaml"; then
-    echo "[INFO] subscription is a full Clash config, use it directly"
-    cp -f "$Temp_Dir/clash.yaml" "$Conf_Dir/config.yaml"
-    force_write_secret "$Conf_Dir/config.yaml"
-    SKIP_CONFIG_REBUILD=true
+if grep -qE '^(proxies:|proxy-providers:|mixed-port:|port:)' "$Temp_Dir/clash.yaml"; then
+  echo "[INFO] subscription is a full Clash config, use it directly"
+  cp -f "$Temp_Dir/clash.yaml" "$Conf_Dir/config.yaml"
+
+  # 生成运行态（systemd non-root 实际启动用 Temp_Dir/config.yaml）
+  cp -f "$Temp_Dir/clash.yaml" "$Temp_Dir/config.yaml"
+
+  # 写 controller/ui + secret（写到运行态）
+  force_write_controller_and_ui "$Temp_Dir/config.yaml" || true
+  force_write_secret "$Temp_Dir/config.yaml" || true
+
+  # 同时把 conf/config.yaml 也补齐（方便你 grep/排查）
+  force_write_controller_and_ui "$Conf_Dir/config.yaml" || true
+  force_write_secret "$Conf_Dir/config.yaml" || true
+
+  # 创建 UI 软链（systemd non-root 用 /tmp）
+  Dashboard_Src="$Server_Dir/dashboard/public"
+  if [ -d "$Dashboard_Src" ]; then
+    if [ "${SYSTEMD_MODE:-false}" = "true" ] && [ "$(id -u)" -ne 0 ]; then
+      ln -sfn "$Dashboard_Src" "$Temp_Dir/ui" 2>/dev/null || true
+    else
+      ln -sfn "$Dashboard_Src" "$Conf_Dir/ui" 2>/dev/null || true
+    fi
   fi
+
+  SKIP_CONFIG_REBUILD=true
 fi
 
 #################### 订阅转换/拼接（非兜底路径） ####################
