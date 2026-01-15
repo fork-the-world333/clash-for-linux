@@ -158,26 +158,41 @@ failure() {
 }
 
 action() {
-  local STRING rc
+  local STRING
   STRING=$1
-  echo -n "$STRING "
   shift
-  "$@" && success $"$STRING" || failure $"$STRING"
-  rc=$?
-  echo
-  return "$rc"
+
+  # 执行命令本身的成功/失败，不应让 UI 输出影响返回码
+  if "$@"; then
+    success $"$STRING" || true
+    return 0
+  else
+    failure $"$STRING" || true
+    return 1
+  fi
 }
 
-# 判断命令是否正常执行（手动模式：失败退出；systemd 模式：由调用处决定）
+# 判断命令是否正常执行
+# - 手动模式：失败直接 exit
+# - systemd 模式：只打印状态，不影响退出码
 if_success() {
   local ok_msg=$1
   local fail_msg=$2
   local rc=$3
+
   if [ "$rc" -eq 0 ]; then
-    action "$ok_msg" /bin/true
+    action "$ok_msg" /bin/true || true
+    return 0
+  fi
+
+  # rc != 0
+  action "$fail_msg" /bin/false || true
+
+  if [ "${SYSTEMD_MODE:-false}" = "true" ]; then
+    # systemd 下不允许在 UI 函数中 exit
+    return "$rc"
   else
-    action "$fail_msg" /bin/false
-    exit 1
+    exit "$rc"
   fi
 }
 
@@ -257,11 +272,10 @@ if [ "$SKIP_CONFIG_REBUILD" != "true" ]; then
   fi
 
   if [ "$ReturnStatus" -eq 0 ]; then
-    action "$Text1" /bin/true
+    action "$Text1" /bin/true || true
   else
-    # systemd 模式：不退出，尝试使用旧配置/兜底配置继续启动
     if [ "$SYSTEMD_MODE" = "true" ]; then
-      action "$Text2（systemd 模式不退出，尝试使用旧配置/兜底配置）" /bin/false
+      action "$Text2（systemd 模式不退出，尝试使用旧配置/兜底配置）" /bin/false || true
       echo -e "\033[33m[WARN]\033[0m Subscribe check failed: http_code=${status_code:-unknown}, url=${URL}" >&2
       ensure_fallback_config
       SKIP_CONFIG_REBUILD=true
@@ -331,10 +345,10 @@ if [ "$SKIP_CONFIG_REBUILD" != "true" ]; then
   fi
 
   if [ "$ReturnStatus" -eq 0 ]; then
-    action "$Text3" /bin/true
+    action "$Text3" /bin/true || true
   else
     if [ "$SYSTEMD_MODE" = "true" ]; then
-      action "$Text4（systemd 模式：下载失败，使用旧配置/兜底配置继续启动）" /bin/false
+      action "$Text4（systemd 模式：下载失败，使用旧配置/兜底配置继续启动）" /bin/false || true
       echo -e "\033[33m[WARN]\033[0m Download failed, will fallback. url=${URL}" >&2
       ensure_fallback_config
       SKIP_CONFIG_REBUILD=true
@@ -496,7 +510,11 @@ if [ "$ReturnStatus" -eq 0 ]; then
   fi
 fi
 
-if_success "$Text5" "$Text6" "$ReturnStatus"
+if [ "${SYSTEMD_MODE:-false}" = "true" ]; then
+  if_success "$Text5" "$Text6" "$ReturnStatus" || true
+else
+  if_success "$Text5" "$Text6" "$ReturnStatus"
+fi
 
 #################### 输出信息 ####################
 
